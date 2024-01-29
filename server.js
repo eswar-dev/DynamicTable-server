@@ -62,20 +62,7 @@ function excelDateToFormattedDate(serial) {
 }
 
 
-app.delete('/data/delete', async (req, res) => {
-  try {
-    // Use mongoose to remove all documents from the collection
-    const result = await DataModel.deleteMany({});
 
-    res.status(200).json({
-      message: 'All data deleted successfully',
-      deletedCount: result.deletedCount,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
 
 
 app.post('/upload', upload.single('file'), async (req, res) => {
@@ -90,7 +77,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         item.Month = excelDateToFormattedDate(item.Month);
       }
     });
-    console.log(excelData)
     // Insert data into MongoDB
     await DataModel.insertMany(excelData);
 
@@ -115,35 +101,55 @@ app.get('/data', async (req, res) => {
 app.get('/Qty-data', async (req, res) => {
   try {
     // Extract Spl value from the request query
-    const filters= req.query.items;
+    const filters = req.query.items;
+    
     // Fetch data from MongoDB based on Spl and other conditions if needed
     const data = await DataModel.find();
 
-    const aggregateData = (data, header) => {
+    const aggregateData = (data, headers) => {
       const aggregatedData = data.reduce((result, record) => {
-        // Generate a key based on the value of the specified header
-        const key = record[header] || '';
+        // Generate a key based on the values of the specified headers
+        const key = headers.map(header => record[header] || '').join('_');
     
         // Initialize count for the key if not present
-        result[key] = (result[key] || 0) + 1;
+        result[key] = result[key] || { total: 0, monthlyCounts: {} };
+    
+        // Increment the total count
+        result[key].total++;
+    
+        // Extract the month from the record
+        const month = record['Month'];
+    
+        // Increment the count for the specific month
+        result[key].monthlyCounts[month] = (result[key].monthlyCounts[month] || 0) + 1;
+    
+        // Increment the count for the specific month in the column-wise totals
+        result.totalMonthlyCounts[month] = (result.totalMonthlyCounts[month] || 0) + 1;
     
         return result;
-      }, {});
+      }, { totalMonthlyCounts: {} });
     
       return aggregatedData;
     };
     
+    
     const aggregatedResults = {};
-    filters?.forEach(filter => {
-      const result = aggregateData(data || [], filter.split(','));
+
+    // Convert single filter to an array to maintain consistency
+    const filterArray = Array.isArray(filters) ? filters : [filters];
+
+    filterArray.forEach(filter => {
+      const result = aggregateData(data, filter.split(','));
       aggregatedResults[filter] = result;
     });
-    res.json({aggregatedResults});
+
+    res.json({ aggregatedResults });
   } catch (error) {
     console.error(error);
     res.status(500).send('Internal Server Error');
   }
 });
+
 
 
 app.listen(PORT, () => {
